@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/common/Navbar';
 import { Toast } from './components/common/Toast';
 import { LoginPage } from './components/auth/LoginPage';
+import { RegisterPage } from './components/auth/RegisterPage';
 import { DosenDashboard } from './components/dosen/DosenDashboard';
 import { ManageCourses } from './components/dosen/ManageCourses';
 import { ManageStudents } from './components/dosen/ManageStudents';
@@ -14,6 +15,18 @@ import { StudentDashboard } from './components/mahasiswa/StudentDashboard';
 const MainLayout: React.FC = () => {
   const { currentUser, isLoading } = useApp();
   const [currentDosenView, setCurrentDosenView] = useState<string>('dashboard');
+
+  // Auth navigation state
+  const [authView, setAuthView] = useState<'login' | 'register'>('login');
+  const [authPrefill, setAuthPrefill] = useState<{
+    role: 'dosen' | 'mahasiswa';
+    identifier: string;
+    notice: string | null;
+  }>({
+    role: 'dosen',
+    identifier: '',
+    notice: null,
+  });
 
   // Parameters passed between views (e.g. shortcut to attendance for a specific meeting)
   const [navParams, setNavParams] = useState<{ courseId?: string; meetingId?: string }>({});
@@ -32,7 +45,29 @@ const MainLayout: React.FC = () => {
   if (!currentUser) {
     return (
       <>
-        <LoginPage />
+        {authView === 'login' ? (
+          <LoginPage
+            onNavigateToRegister={(targetRole) => {
+              setAuthPrefill((prev) => ({ ...prev, role: targetRole, notice: null }));
+              setAuthView('register');
+            }}
+            prefillRole={authPrefill.role}
+            prefillIdentifier={authPrefill.identifier}
+            confirmationNotice={authPrefill.notice}
+          />
+        ) : (
+          <RegisterPage
+            initialRole={authPrefill.role}
+            onNavigateToLogin={(targetRole, prefillId, notice) => {
+              setAuthPrefill({
+                role: targetRole,
+                identifier: prefillId || '',
+                notice: notice || null,
+              });
+              setAuthView('login');
+            }}
+          />
+        )}
         <Toast />
       </>
     );

@@ -8,7 +8,12 @@ import {
   GradeRecord,
   Announcement,
   AttendanceStatus,
+  RegisterPayload,
+  RegisterResult,
 } from '../types';
+import { safeFetchJson } from '../utils/safeFetch';
+import { hashPasswordClient, verifyPasswordClient } from '../utils/security';
+import { initialLocalData } from '../data/seedFallback';
 
 interface AppContextType {
   currentUser: User | null;
@@ -24,6 +29,7 @@ interface AppContextType {
 
   // Auth
   login: (role: 'dosen' | 'mahasiswa', identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (payload: RegisterPayload) => Promise<RegisterResult>;
   logout: () => void;
   quickLogin: (user: User) => void;
 
@@ -92,19 +98,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/data');
-      if (!res.ok) throw new Error('Gagal mengambil data sistem.');
-      const data = await res.json();
-      setUsers(data.users || []);
-      setCourses(data.courses || []);
-      setEnrollments(data.enrollments || []);
-      setMeetings(data.meetings || []);
-      setAttendance(data.attendance || []);
-      setGrades(data.grades || []);
-      setAnnouncements(data.announcements || []);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Terjadi kesalahan');
+      const res = await safeFetchJson<any>('/api/data');
+      if (res.ok && res.data) {
+        setUsers(res.data.users || []);
+        setCourses(res.data.courses || []);
+        setEnrollments(res.data.enrollments || []);
+        setMeetings(res.data.meetings || []);
+        setAttendance(res.data.attendance || []);
+        setGrades(res.data.grades || []);
+        setAnnouncements(res.data.announcements || []);
+        localStorage.setItem('portal_cache_db', JSON.stringify(res.data));
+        setError(null);
+      } else {
+        // Fallback to local cached data or seed data
+        const localCached = localStorage.getItem('portal_cache_db');
+        if (localCached) {
+          try {
+            const parsed = JSON.parse(localCached);
+            setUsers(parsed.users || initialLocalData.users);
+            setCourses(parsed.courses || initialLocalData.courses);
+            setEnrollments(parsed.enrollments || initialLocalData.enrollments);
+            setMeetings(parsed.meetings || initialLocalData.meetings);
+            setAttendance(parsed.attendance || initialLocalData.attendance);
+            setGrades(parsed.grades || initialLocalData.grades);
+            setAnnouncements(parsed.announcements || initialLocalData.announcements);
+          } catch {
+            setUsers(initialLocalData.users);
+            setCourses(initialLocalData.courses);
+            setEnrollments(initialLocalData.enrollments);
+            setMeetings(initialLocalData.meetings);
+            setAttendance(initialLocalData.attendance);
+            setGrades(initialLocalData.grades);
+            setAnnouncements(initialLocalData.announcements);
+          }
+        } else {
+          setUsers(initialLocalData.users);
+          setCourses(initialLocalData.courses);
+          setEnrollments(initialLocalData.enrollments);
+          setMeetings(initialLocalData.meetings);
+          setAttendance(initialLocalData.attendance);
+          setGrades(initialLocalData.grades);
+          setAnnouncements(initialLocalData.announcements);
+          localStorage.setItem('portal_cache_db', JSON.stringify(initialLocalData));
+        }
+      }
+    } catch {
+      setUsers(initialLocalData.users);
+      setCourses(initialLocalData.courses);
+      setEnrollments(initialLocalData.enrollments);
+      setMeetings(initialLocalData.meetings);
+      setAttendance(initialLocalData.attendance);
+      setGrades(initialLocalData.grades);
+      setAnnouncements(initialLocalData.announcements);
     } finally {
       setIsLoading(false);
     }
@@ -126,23 +171,209 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const login = async (role: 'dosen' | 'mahasiswa', identifier: string, password: string) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await safeFetchJson<{ user: User }>('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, identifier, password }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || 'Login gagal.' };
+      if (res.ok && res.data?.user) {
+        setCurrentUser(res.data.user);
+        localStorage.setItem('portal_user', JSON.stringify(res.data.user));
+        showToast(`Selamat datang, ${res.data.user.name}!`, 'success');
+        return { success: true };
       }
 
-      setCurrentUser(data.user);
-      localStorage.setItem('portal_user', JSON.stringify(data.user));
-      showToast(`Selamat datang, ${data.user.name}!`, 'success');
+      // If server returned a clear validation error message
+      if (!res.isHtmlOrNotJson && res.error) {
+        return { success: false, error: res.error };
+      }
+
+      // Fallback local authentication (for static deployment / offline)
+      const cleanId = identifier.trim().toLowerCase();
+      const localCached = localStorage.getItem('portal_cache_db');
+      let currentUsers = users;
+      if (localCached) {
+        try {
+          const parsed = JSON.parse(localCached);
+          if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+            currentUsers = parsed.users;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const found = currentUsers.find((u) => {
+        if (role === 'dosen') {
+          return u.role === 'dosen' && u.email.toLowerCase() === cleanId;
+        } else {
+          return (
+            u.role === 'mahasiswa' &&
+            (u.nim === identifier.trim() || u.email.toLowerCase() === cleanId)
+          );
+        }
+      });
+
+      if (!found) {
+        return {
+          success: false,
+          error: role === 'dosen' ? 'Email dosen tidak terdaftar.' : 'NIM atau email mahasiswa tidak ditemukan.',
+        };
+      }
+
+      const isMatch = await verifyPasswordClient(password, found.password || '');
+      if (!isMatch) {
+        return { success: false, error: 'Kata sandi tidak sesuai. Periksa kembali kata sandi Anda.' };
+      }
+
+      const { password: _, ...userSafe } = found;
+      setCurrentUser(userSafe);
+      localStorage.setItem('portal_user', JSON.stringify(userSafe));
+      showToast(`Selamat datang, ${userSafe.name}!`, 'success');
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || 'Koneksi ke server gagal.' };
+    }
+  };
+
+  const register = async (payload: RegisterPayload): Promise<RegisterResult> => {
+    try {
+      // 1. Try server API registration first
+      const res = await safeFetchJson<{
+        success: boolean;
+        message: string;
+        user: User;
+        enrolledCourse?: string | null;
+      }>('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok && res.data) {
+        await fetchData();
+        showToast(res.data.message || 'Pendaftaran berhasil!', 'success');
+        return {
+          success: true,
+          message: res.data.message,
+          user: res.data.user,
+          enrolledCourse: res.data.enrolledCourse,
+        };
+      }
+
+      // If server returned a business validation error (e.g. duplicate email/nim)
+      if (!res.isHtmlOrNotJson && res.error) {
+        return { success: false, error: res.error };
+      }
+
+      // 2. Fallback local registration (e.g. if deployed on static Vercel)
+      const hashedPassword = await hashPasswordClient(payload.password);
+
+      // Get latest cache
+      const localCached = localStorage.getItem('portal_cache_db');
+      const dbObj = localCached ? JSON.parse(localCached) : { ...initialLocalData };
+      const currentList: User[] = dbObj.users || users;
+
+      if (payload.role === 'dosen') {
+        const cleanEmail = payload.email.trim().toLowerCase();
+        if (currentList.some((u) => u.email.toLowerCase() === cleanEmail)) {
+          return {
+            success: false,
+            error: 'Email dosen sudah terdaftar. Silakan gunakan email lain atau langsung masuk.',
+          };
+        }
+
+        const newDosen: User = {
+          id: `usr-dosen-${Date.now()}`,
+          role: 'dosen',
+          name: payload.name.trim(),
+          email: cleanEmail,
+          password: hashedPassword,
+          avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+        };
+
+        const updatedUsers = [...currentList, newDosen];
+        setUsers(updatedUsers);
+        dbObj.users = updatedUsers;
+        localStorage.setItem('portal_cache_db', JSON.stringify(dbObj));
+
+        const { password: _, ...safeDosen } = newDosen;
+        const msg = 'Pendaftaran Dosen berhasil! Silakan masuk menggunakan email dan kata sandi Anda.';
+        showToast(msg, 'success');
+        return { success: true, message: msg, user: safeDosen };
+      } else {
+        // Mahasiswa
+        const cleanNim = (payload.nim || '').trim();
+        const cleanEmail = payload.email && payload.email.trim()
+          ? payload.email.trim().toLowerCase()
+          : `${cleanNim}@student.kampus.ac.id`;
+
+        if (currentList.some((u) => u.nim === cleanNim)) {
+          return {
+            success: false,
+            error: 'NIM sudah terdaftar dalam sistem. Silakan langsung masuk dengan NIM tersebut.',
+          };
+        }
+        if (currentList.some((u) => u.email.toLowerCase() === cleanEmail)) {
+          return {
+            success: false,
+            error: 'Email sudah digunakan oleh akun lain. Silakan periksa kembali email Anda.',
+          };
+        }
+
+        let enrolledCourseName: string | null = null;
+        const updatedEnrollments: Enrollment[] = dbObj.enrollments || [...enrollments];
+        const allCourses: Course[] = dbObj.courses || courses;
+
+        if (payload.kodeKelas && payload.kodeKelas.trim()) {
+          const code = payload.kodeKelas.trim().toUpperCase();
+          const crs = allCourses.find((c) => c.kode.toUpperCase() === code || c.id === payload.kodeKelas?.trim());
+          if (crs) {
+            enrolledCourseName = crs.nama;
+            const newEnr: Enrollment = {
+              id: `enr-${Date.now()}`,
+              courseId: crs.id,
+              studentNim: cleanNim,
+              enrolledAt: new Date().toISOString(),
+            };
+            updatedEnrollments.push(newEnr);
+            setEnrollments(updatedEnrollments);
+          }
+        }
+
+        const newStudent: User = {
+          id: `usr-mhs-${Date.now()}`,
+          role: 'mahasiswa',
+          name: payload.name.trim(),
+          email: cleanEmail,
+          nim: cleanNim,
+          prodi: payload.prodi || 'Teknik Informatika',
+          semester: Number(payload.semester) || 1,
+          password: hashedPassword,
+          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        };
+
+        const updatedUsers = [...currentList, newStudent];
+        setUsers(updatedUsers);
+        dbObj.users = updatedUsers;
+        dbObj.enrollments = updatedEnrollments;
+        localStorage.setItem('portal_cache_db', JSON.stringify(dbObj));
+
+        const { password: _, ...safeStudent } = newStudent;
+        const msg = enrolledCourseName
+          ? `Pendaftaran berhasil dan Anda otomatis terdaftar pada kelas ${enrolledCourseName}!`
+          : 'Pendaftaran Mahasiswa berhasil! Silakan masuk menggunakan NIM atau Email Anda.';
+        showToast(msg, 'success');
+        return {
+          success: true,
+          message: msg,
+          user: safeStudent,
+          enrolledCourse: enrolledCourseName,
+        };
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Terjadi kesalahan saat pendaftaran.' };
     }
   };
 
@@ -554,6 +785,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isLoading,
         error,
         login,
+        register,
         logout,
         quickLogin,
         createCourse,

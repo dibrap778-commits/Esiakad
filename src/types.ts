@@ -1,5 +1,25 @@
 export type UserRole = 'dosen' | 'mahasiswa';
 
+export interface RegisterPayload {
+  role: UserRole;
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword?: string;
+  nim?: string;
+  kodeKelas?: string;
+  prodi?: string;
+  semester?: number;
+}
+
+export interface RegisterResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  user?: User;
+  enrolledCourse?: string | null;
+}
+
 export interface User {
   id: string;
   role: UserRole;

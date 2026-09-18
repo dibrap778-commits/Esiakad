@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { getDb, saveDb, resetDb } from './server/db';
@@ -11,12 +12,29 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Helper to hash passwords using SHA-256
+  const hashPassword = (pwd: string): string => {
+    return crypto.createHash('sha256').update(pwd).digest('hex');
+  };
+
+  // Helper to verify passwords against hash or legacy seed plain-text
+  const verifyPassword = (input: string, stored?: string): boolean => {
+    if (!stored) return false;
+    return stored === hashPassword(input) || stored === input;
+  };
+
   // Helper to sanitize users (strip passwords)
   const sanitizeUsers = (users: User[]) =>
     users.map(({ password, ...u }) => u);
 
   // Initialize DB on boot
   getDb();
+
+  // Middleware: Ensure all /api responses default to JSON Content-Type
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+  });
 
   // API Routes
   app.get('/api/health', (req, res) => {
@@ -55,6 +73,125 @@ async function startServer() {
     });
   });
 
+  // Authentication Register
+  app.post('/api/auth/register', (req, res) => {
+    const { role, name, email, password, nim, kodeKelas, prodi, semester } = req.body;
+
+    if (!role || !['dosen', 'mahasiswa'].includes(role)) {
+      return res.status(400).json({ error: 'Peran akun (role) tidak valid.' });
+    }
+
+    const db = getDb();
+
+    if (role === 'dosen') {
+      if (!name || !name.trim() || !email || !email.trim() || !password) {
+        return res.status(400).json({ error: 'Nama lengkap, email, dan kata sandi wajib diisi.' });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const existingUser = db.users.find(
+        (u) => u.email.toLowerCase() === cleanEmail
+      );
+      if (existingUser) {
+        return res.status(400).json({
+          error: 'Email dosen sudah terdaftar. Silakan gunakan email lain atau langsung masuk.',
+        });
+      }
+
+      const newDosen: User = {
+        id: `usr-dosen-${Date.now()}`,
+        role: 'dosen',
+        name: name.trim(),
+        email: cleanEmail,
+        password: hashPassword(password),
+        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+      };
+
+      db.users.push(newDosen);
+      saveDb(db);
+
+      const { password: _, ...safeDosen } = newDosen;
+      return res.status(201).json({
+        success: true,
+        message: 'Pendaftaran Dosen berhasil! Silakan masuk.',
+        user: safeDosen,
+      });
+    } else {
+      // Role Mahasiswa
+      if (!nim || !nim.trim() || !name || !name.trim() || !password) {
+        return res.status(400).json({ error: 'NIM, nama lengkap, dan kata sandi wajib diisi.' });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+      }
+
+      const cleanNim = nim.trim();
+      const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : `${cleanNim}@student.kampus.ac.id`;
+
+      const existingNim = db.users.find((u) => u.nim === cleanNim);
+      if (existingNim) {
+        return res.status(400).json({
+          error: 'NIM sudah terdaftar dalam sistem. Silakan langsung masuk dengan NIM tersebut.',
+        });
+      }
+
+      const existingEmail = db.users.find((u) => u.email.toLowerCase() === cleanEmail);
+      if (existingEmail) {
+        return res.status(400).json({
+          error: 'Email sudah digunakan oleh akun lain. Silakan periksa kembali email Anda.',
+        });
+      }
+
+      // Auto-enroll if kodeKelas is provided
+      let enrolledCourseName: string | null = null;
+      if (kodeKelas && kodeKelas.trim()) {
+        const cleanCode = kodeKelas.trim().toUpperCase();
+        const course = db.courses.find(
+          (c) => c.kode.toUpperCase() === cleanCode || c.id === kodeKelas.trim()
+        );
+        if (course) {
+          enrolledCourseName = course.nama;
+          db.enrollments.push({
+            id: `enr-${Date.now()}`,
+            courseId: course.id,
+            studentNim: cleanNim,
+            enrolledAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      const newMahasiswa: User = {
+        id: `usr-mhs-${Date.now()}`,
+        role: 'mahasiswa',
+        name: name.trim(),
+        email: cleanEmail,
+        nim: cleanNim,
+        prodi: prodi || 'Teknik Informatika',
+        semester: Number(semester) || 1,
+        password: hashPassword(password),
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+      };
+
+      db.users.push(newMahasiswa);
+      saveDb(db);
+
+      const { password: _, ...safeMahasiswa } = newMahasiswa;
+      return res.status(201).json({
+        success: true,
+        message: enrolledCourseName
+          ? `Pendaftaran berhasil dan Anda otomatis terdaftar pada kelas ${enrolledCourseName}!`
+          : 'Pendaftaran Mahasiswa berhasil! Silakan masuk menggunakan NIM atau Email Anda.',
+        user: safeMahasiswa,
+        enrolledCourse: enrolledCourseName,
+      });
+    }
+  });
+
   // Authentication Login
   app.post('/api/auth/login', (req, res) => {
     const { role, identifier, password } = req.body;
@@ -64,25 +201,28 @@ async function startServer() {
 
     const db = getDb();
     let foundUser: User | undefined;
+    const cleanId = identifier.trim().toLowerCase();
 
     if (role === 'dosen') {
       foundUser = db.users.find(
-        (u) => u.role === 'dosen' && u.email.toLowerCase() === identifier.trim().toLowerCase()
+        (u) => u.role === 'dosen' && u.email.toLowerCase() === cleanId
       );
     } else {
       foundUser = db.users.find(
-        (u) => u.role === 'mahasiswa' && u.nim === identifier.trim()
+        (u) =>
+          u.role === 'mahasiswa' &&
+          (u.nim === identifier.trim() || u.email.toLowerCase() === cleanId)
       );
     }
 
     if (!foundUser) {
       return res.status(401).json({
-        error: role === 'dosen' ? 'Email dosen tidak terdaftar.' : 'NIM mahasiswa tidak ditemukan.',
+        error: role === 'dosen' ? 'Email dosen tidak terdaftar.' : 'NIM atau email mahasiswa tidak ditemukan.',
       });
     }
 
-    if (foundUser.password && foundUser.password !== password) {
-      return res.status(401).json({ error: 'Kata sandi tidak sesuai.' });
+    if (!verifyPassword(password, foundUser.password)) {
+      return res.status(401).json({ error: 'Kata sandi tidak sesuai. Periksa kembali kata sandi Anda.' });
     }
 
     const { password: _, ...userSafe } = foundUser;
@@ -205,7 +345,7 @@ async function startServer() {
       nim: nim.trim(),
       prodi: prodi || 'Teknik Informatika',
       semester: Number(semester) || 4,
-      password: password || 'password123',
+      password: hashPassword(password || 'password123'),
       avatar: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
     };
 
@@ -225,13 +365,17 @@ async function startServer() {
     }
 
     const current = db.users[index];
+    const updatedPassword = req.body.password
+      ? hashPassword(req.body.password)
+      : current.password;
+
     const updated: User = {
       ...current,
       name: req.body.name || current.name,
       email: req.body.email || current.email,
       prodi: req.body.prodi || current.prodi,
       semester: Number(req.body.semester) || current.semester,
-      password: req.body.password || current.password,
+      password: updatedPassword,
     };
 
     db.users[index] = updated;
@@ -604,6 +748,24 @@ async function startServer() {
         result: `Pengumuman Penting:\n\nSehubungan dengan ${prompt}, diberitahukan kepada seluruh mahasiswa agar mempersiapkan berkas dan materi terkait. Jika ada kendala, silakan berkonsultasi melalui forum portal kelas.\n\nTerima kasih.`,
       });
     }
+  });
+
+  // Catch-all for undefined /api routes: ALWAYS return JSON 404, never HTML!
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      error: `Rute API '${req.method} ${req.originalUrl}' tidak ditemukan.`,
+    });
+  });
+
+  // Global error handler for API requests to ensure JSON response
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('API Error:', err);
+    if (req.path.startsWith('/api') || req.xhr) {
+      return res.status(500).json({
+        error: err.message || 'Terjadi kesalahan pada server internal.',
+      });
+    }
+    next(err);
   });
 
   // Vite development middleware or production static serving
