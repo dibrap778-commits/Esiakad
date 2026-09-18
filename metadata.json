@@ -1,0 +1,7 @@
+{
+  "name": "Portal Kelas Kuliah",
+  "description": "Portal kelas interaktif full-stack untuk dosen dan mahasiswa dengan pengelolaan mata kuliah, materi video embed, presensi mandiri, penilaian terstruktur, dan pengumuman.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
