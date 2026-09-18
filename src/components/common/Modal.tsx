@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -27,6 +26,8 @@ export const Modal: React.FC<ModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  if (!isOpen) return null;
+
   const maxWMap = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -37,40 +38,36 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <div
-          id="modal-overlay"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto"
-        >
-          <motion.div
-            id="modal-container"
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 10 }}
-            transition={{ duration: 0.18 }}
-            className={`w-full ${maxWMap[maxWidth]} my-8 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]`}
+    <div
+      id="modal-overlay"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        id="modal-container"
+        className={`w-full ${maxWMap[maxWidth]} my-8 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+            {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+          </div>
+          <button
+            id="modal-close-button"
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+            aria-label="Tutup"
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-              <div>
-                <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-                {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
-              </div>
-              <button
-                id="modal-close-button"
-                type="button"
-                onClick={onClose}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-lg transition-colors"
-                aria-label="Tutup"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1">{children}</div>
-          </motion.div>
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      )}
-    </AnimatePresence>
+
+        <div className="p-6 overflow-y-auto flex-1">{children}</div>
+      </div>
+    </div>
   );
 };

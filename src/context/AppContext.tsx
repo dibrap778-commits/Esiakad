@@ -158,18 +158,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     fetchData();
 
-    // Check stored user session
+    // Check stored user session safely
     const savedUser = localStorage.getItem('portal_user');
     if (savedUser) {
       try {
-        setCurrentUser(JSON.parse(savedUser));
-      } catch {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && typeof parsed === 'object' && parsed.role) {
+          console.log('[Auth] Ditemukan sesi tersimpan:', parsed.email, 'Peran:', parsed.role);
+          setCurrentUser(parsed);
+        } else {
+          console.warn('[Auth] Sesi tersimpan tidak valid, membersihkan storage.');
+          localStorage.removeItem('portal_user');
+        }
+      } catch (e) {
+        console.error('[Auth] Gagal membaca session user dari localStorage:', e);
         localStorage.removeItem('portal_user');
       }
     }
   }, [fetchData]);
 
   const login = async (role: 'dosen' | 'mahasiswa', identifier: string, password: string) => {
+    console.log('[Auth] Memulai login:', { role, identifier });
     try {
       const res = await safeFetchJson<{ user: User }>('/api/auth/login', {
         method: 'POST',
@@ -178,16 +187,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       if (res.ok && res.data?.user) {
-        setCurrentUser(res.data.user);
-        localStorage.setItem('portal_user', JSON.stringify(res.data.user));
-        showToast(`Selamat datang, ${res.data.user.name}!`, 'success');
+        const loggedUser = res.data.user;
+        console.log('[Auth] Login via API server berhasil:', loggedUser.email, loggedUser.role);
+        setCurrentUser(loggedUser);
+        localStorage.setItem('portal_user', JSON.stringify(loggedUser));
+        showToast(`Selamat datang, ${loggedUser.name}!`, 'success');
         return { success: true };
       }
 
       // If server returned a clear validation error message
       if (!res.isHtmlOrNotJson && res.error) {
+        console.warn('[Auth] Server mengembalikan pesan kesalahan:', res.error);
         return { success: false, error: res.error };
       }
+
+      console.log('[Auth] API tidak tersedia atau statis (Vercel). Beralih ke verifikasi lokal/fallback...');
 
       // Fallback local authentication (for static deployment / offline)
       const cleanId = identifier.trim().toLowerCase();
@@ -216,23 +230,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       if (!found) {
+        const errMsg = role === 'dosen' ? 'Email dosen tidak terdaftar.' : 'NIM atau email mahasiswa tidak ditemukan.';
+        console.warn('[Auth] Pengguna tidak ditemukan:', errMsg);
         return {
           success: false,
-          error: role === 'dosen' ? 'Email dosen tidak terdaftar.' : 'NIM atau email mahasiswa tidak ditemukan.',
+          error: errMsg,
         };
       }
 
       const isMatch = await verifyPasswordClient(password, found.password || '');
       if (!isMatch) {
+        console.warn('[Auth] Kata sandi tidak cocok.');
         return { success: false, error: 'Kata sandi tidak sesuai. Periksa kembali kata sandi Anda.' };
       }
 
       const { password: _, ...userSafe } = found;
+      console.log('[Auth] Login lokal berhasil untuk:', userSafe.name, 'Peran:', userSafe.role);
       setCurrentUser(userSafe);
       localStorage.setItem('portal_user', JSON.stringify(userSafe));
       showToast(`Selamat datang, ${userSafe.name}!`, 'success');
       return { success: true };
     } catch (err: any) {
+      console.error('[Auth] Exception saat login:', err);
       return { success: false, error: err.message || 'Koneksi ke server gagal.' };
     }
   };

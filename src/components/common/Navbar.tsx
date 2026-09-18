@@ -122,19 +122,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate }) => {
                 {currentUser.avatar ? (
                   <img
                     src={currentUser.avatar}
-                    alt={currentUser.name}
+                    alt={currentUser.name || 'User'}
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-600">
-                    {currentUser.name.charAt(0)}
+                    {(currentUser.name || currentUser.email || 'U').charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
               <div className="hidden sm:block text-left">
                 <div className="text-xs font-bold text-slate-800 leading-tight truncate max-w-[140px]">
-                  {currentUser.name}
+                  {currentUser.name || currentUser.email || 'Pengguna'}
                 </div>
                 <div className="text-[10px] text-slate-500 truncate max-w-[140px]">
                   {isDosen ? `NIDN: ${currentUser.nidn || '-'}` : `NIM: ${currentUser.nim || '-'}`}

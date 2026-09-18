@@ -23,20 +23,30 @@ interface DosenDashboardProps {
 export const DosenDashboard: React.FC<DosenDashboardProps> = ({ onNavigate }) => {
   const { courses, users, meetings, attendance, grades, announcements, enrollments } = useApp();
 
-  const students = users.filter((u) => u.role === 'mahasiswa');
-  const totalCourses = courses.length;
+  const safeCourses = Array.isArray(courses) ? courses : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeMeetings = Array.isArray(meetings) ? meetings : [];
+  const safeAttendance = Array.isArray(attendance) ? attendance : [];
+  const safeGrades = Array.isArray(grades) ? grades : [];
+  const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
+  const safeEnrollments = Array.isArray(enrollments) ? enrollments : [];
+
+  const students = safeUsers.filter((u) => u.role === 'mahasiswa');
+  const totalCourses = safeCourses.length;
   const totalStudents = students.length;
 
   // Calculate average attendance across all recorded attendance
-  const totalAttendanceRecords = attendance.length;
-  const hadirRecords = attendance.filter((a) => a.status === 'Hadir').length;
+  const totalAttendanceRecords = safeAttendance.length;
+  const hadirRecords = safeAttendance.filter((a) => a.status === 'Hadir').length;
   const avgAttendance = totalAttendanceRecords > 0 ? Math.round((hadirRecords / totalAttendanceRecords) * 100) : 0;
 
   // Count unpublished (draft) grades
-  const unpublishedGrades = grades.filter((g) => g.status === 'draft').length;
+  const unpublishedGrades = safeGrades.filter((g) => g.status === 'draft').length;
 
   // Open self-attendance sessions
-  const activeAttendanceSessions = meetings.filter((m) => m.isAttendanceOpen);
+  const activeAttendanceSessions = safeMeetings.filter((m) => m.isAttendanceOpen);
+
+  console.log('[DosenDashboard] Mounted with', totalCourses, 'courses and', totalStudents, 'students');
 
   return (
     <div className="space-y-6">

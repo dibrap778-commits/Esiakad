@@ -32,9 +32,20 @@ export const StudentDashboard: React.FC = () => {
 
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
-  if (!currentUser || currentUser.role !== 'mahasiswa' || !currentUser.nim) {
-    return null;
+  if (!currentUser || currentUser.role !== 'mahasiswa') {
+    return (
+      <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+        <p className="text-slate-600 font-semibold">Sesi tidak valid untuk dashboard mahasiswa.</p>
+      </div>
+    );
   }
+
+  const studentNim = currentUser.nim || '';
+  const safeEnrollments = Array.isArray(enrollments) ? enrollments : [];
+  const safeCourses = Array.isArray(courses) ? courses : [];
+  const safeMeetings = Array.isArray(meetings) ? meetings : [];
+  const safeAttendance = Array.isArray(attendance) ? attendance : [];
+  const safeGrades = Array.isArray(grades) ? grades : [];
 
   // If a course is selected, show detail view
   if (selectedCourseId) {
@@ -47,8 +58,8 @@ export const StudentDashboard: React.FC = () => {
   }
 
   // Enrolled courses for this student
-  const studentEnrollments = enrollments.filter((e) => e.studentNim === currentUser.nim);
-  const enrolledCourses = courses.filter((c) =>
+  const studentEnrollments = studentNim ? safeEnrollments.filter((e) => e.studentNim === studentNim) : [];
+  const enrolledCourses = safeCourses.filter((c) =>
     studentEnrollments.some((e) => e.courseId === c.id)
   );
 
@@ -56,21 +67,23 @@ export const StudentDashboard: React.FC = () => {
 
   // Check if any enrolled course has an active self-attendance session where student hasn't signed yet
   const activeAttendanceOpportunities: { course: Course; meeting: any }[] = [];
-  enrolledCourses.forEach((c) => {
-    const cMeetings = meetings.filter((m) => m.courseId === c.id && m.isAttendanceOpen);
-    cMeetings.forEach((m) => {
-      const alreadyAttended = attendance.some(
-        (a) => a.meetingId === m.id && a.studentNim === currentUser.nim && a.status === 'Hadir'
-      );
-      if (!alreadyAttended) {
-        activeAttendanceOpportunities.push({ course: c, meeting: m });
-      }
+  if (studentNim) {
+    enrolledCourses.forEach((c) => {
+      const cMeetings = safeMeetings.filter((m) => m.courseId === c.id && m.isAttendanceOpen);
+      cMeetings.forEach((m) => {
+        const alreadyAttended = safeAttendance.some(
+          (a) => a.meetingId === m.id && a.studentNim === studentNim && a.status === 'Hadir'
+        );
+        if (!alreadyAttended) {
+          activeAttendanceOpportunities.push({ course: c, meeting: m });
+        }
+      });
     });
-  });
+  }
 
   // Calculate overall attendance rate
-  const myAttendance = attendance.filter((a) => a.studentNim === currentUser.nim);
-  const totalRelevantMeetings = meetings.filter((m) =>
+  const myAttendance = studentNim ? safeAttendance.filter((a) => a.studentNim === studentNim) : [];
+  const totalRelevantMeetings = safeMeetings.filter((m) =>
     enrolledCourses.some((c) => c.id === m.courseId)
   ).length;
   const myHadirCount = myAttendance.filter((a) => a.status === 'Hadir').length;
@@ -79,9 +92,11 @@ export const StudentDashboard: React.FC = () => {
     : 100;
 
   // Published grades for this student
-  const publishedGrades = grades.filter(
-    (g) => g.studentNim === currentUser.nim && g.status === 'published'
-  );
+  const publishedGrades = studentNim ? safeGrades.filter(
+    (g) => g.studentNim === studentNim && g.status === 'published'
+  ) : [];
+
+  console.log('[StudentDashboard] Rendered for:', currentUser.name, 'NIM:', studentNim, 'Enrolled courses:', enrolledCourses.length);
 
   return (
     <div className="space-y-6">
@@ -89,22 +104,28 @@ export const StudentDashboard: React.FC = () => {
       <div className="bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 text-white p-6 rounded-2xl shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <img
-              src={currentUser.avatar}
-              alt={currentUser.name}
-              className="w-16 h-16 rounded-2xl object-cover ring-4 ring-white/20 shadow-md shrink-0"
-              referrerPolicy="no-referrer"
-            />
+            {currentUser.avatar ? (
+              <img
+                src={currentUser.avatar}
+                alt={currentUser.name || 'Mahasiswa'}
+                className="w-16 h-16 rounded-2xl object-cover ring-4 ring-white/20 shadow-md shrink-0"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-white/20 ring-4 ring-white/20 shadow-md shrink-0 flex items-center justify-center text-xl font-bold text-white">
+                {(currentUser.name || 'M').charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-white/20 text-white">
-                  NIM: {currentUser.nim}
+                  NIM: {currentUser.nim || '-'}
                 </span>
                 <span className="text-xs text-blue-100 font-medium">Mahasiswa Aktif</span>
               </div>
-              <h1 className="text-xl sm:text-2xl font-black mt-1">{currentUser.name}</h1>
+              <h1 className="text-xl sm:text-2xl font-black mt-1">{currentUser.name || 'Mahasiswa'}</h1>
               <p className="text-xs text-blue-100">
-                {currentUser.prodi} • Semester {currentUser.semester} • {currentUser.email}
+                {currentUser.prodi || 'Program Studi'} • Semester {currentUser.semester || '1'} • {currentUser.email}
               </p>
             </div>
           </div>

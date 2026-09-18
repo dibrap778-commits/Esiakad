@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Navbar } from './components/common/Navbar';
 import { Toast } from './components/common/Toast';
 import { LoginPage } from './components/auth/LoginPage';
@@ -31,6 +32,10 @@ const MainLayout: React.FC = () => {
   // Parameters passed between views (e.g. shortcut to attendance for a specific meeting)
   const [navParams, setNavParams] = useState<{ courseId?: string; meetingId?: string }>({});
 
+  useEffect(() => {
+    console.log('[App:MainLayout] Rendered. isLoading:', isLoading, 'currentUser:', currentUser ? `${currentUser.name} (${currentUser.role})` : 'null');
+  }, [isLoading, currentUser]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -48,6 +53,7 @@ const MainLayout: React.FC = () => {
         {authView === 'login' ? (
           <LoginPage
             onNavigateToRegister={(targetRole) => {
+              console.log('[App] Navigating to register for role:', targetRole);
               setAuthPrefill((prev) => ({ ...prev, role: targetRole, notice: null }));
               setAuthView('register');
             }}
@@ -59,6 +65,7 @@ const MainLayout: React.FC = () => {
           <RegisterPage
             initialRole={authPrefill.role}
             onNavigateToLogin={(targetRole, prefillId, notice) => {
+              console.log('[App] Navigating to login for role:', targetRole);
               setAuthPrefill({
                 role: targetRole,
                 identifier: prefillId || '',
@@ -74,11 +81,14 @@ const MainLayout: React.FC = () => {
   }
 
   const handleDosenNavigate = (view: string, courseId?: string, meetingId?: string) => {
+    console.log('[App] Dosen navigate to view:', view, 'params:', { courseId, meetingId });
     setCurrentDosenView(view);
     if (courseId || meetingId) {
       setNavParams({ courseId, meetingId });
     }
   };
+
+  const validDosenViews = ['dashboard', 'courses', 'students', 'meetings', 'attendance', 'grades'];
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -93,33 +103,41 @@ const MainLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {currentUser.role === 'dosen' ? (
-          <>
-            {currentDosenView === 'dashboard' && (
-              <DosenDashboard onNavigate={handleDosenNavigate} />
-            )}
-            {currentDosenView === 'courses' && <ManageCourses />}
-            {currentDosenView === 'students' && <ManageStudents />}
-            {currentDosenView === 'meetings' && (
-              <ManageMeetings
-                initialCourseId={navParams.courseId}
-                onNavigateToAttendance={(cid, mid) => handleDosenNavigate('attendance', cid, mid)}
-              />
-            )}
-            {currentDosenView === 'attendance' && (
-              <ManageAttendance
-                initialCourseId={navParams.courseId}
-                initialMeetingId={navParams.meetingId}
-              />
-            )}
-            {currentDosenView === 'grades' && (
-              <ManageGrades initialCourseId={navParams.courseId} />
-            )}
-          </>
-        ) : (
-          /* Student Role */
-          <StudentDashboard />
-        )}
+        <ErrorBoundary fallbackTitle="Terjadi Kendala saat Memuat Halaman Dashboard">
+          {currentUser.role === 'dosen' ? (
+            <>
+              {currentDosenView === 'dashboard' && (
+                <DosenDashboard onNavigate={handleDosenNavigate} />
+              )}
+              {currentDosenView === 'courses' && <ManageCourses />}
+              {currentDosenView === 'students' && <ManageStudents />}
+              {currentDosenView === 'meetings' && (
+                <ManageMeetings
+                  initialCourseId={navParams.courseId}
+                  onNavigateToAttendance={(cid, mid) => handleDosenNavigate('attendance', cid, mid)}
+                />
+              )}
+              {currentDosenView === 'attendance' && (
+                <ManageAttendance
+                  initialCourseId={navParams.courseId}
+                  initialMeetingId={navParams.meetingId}
+                />
+              )}
+              {currentDosenView === 'grades' && (
+                <ManageGrades initialCourseId={navParams.courseId} />
+              )}
+              {!validDosenViews.includes(currentDosenView) && (
+                <DosenDashboard onNavigate={handleDosenNavigate} />
+              )}
+            </>
+          ) : currentUser.role === 'mahasiswa' ? (
+            <StudentDashboard />
+          ) : (
+            <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+              <p className="text-slate-600 font-semibold">Peran akun ({currentUser.role}) tidak dikenali.</p>
+            </div>
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}
@@ -137,8 +155,10 @@ const MainLayout: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainLayout />
-    </AppProvider>
+    <ErrorBoundary fallbackTitle="Terjadi Kendala pada Aplikasi Portal Perkuliahan">
+      <AppProvider>
+        <MainLayout />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
